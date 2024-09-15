@@ -3,16 +3,19 @@ import { ApiResponse } from "../utils/ApiResponse.util.js";
 import { User } from "../models/user.model.js";
 import { uploadLocalToCloudinary } from "../utils/cloudinary.util.js";
 
-const generateAccessTokenAndRefershTokens = async (user) => {
+const generateAccessTokenAndRefershTokens = async (userId) => {
      try {
-          const { _id: userId } = user;
+          const user = await User.findById(userId);
           console.log(userId);
 
-          const accessToken = user.generateAccessToken();
-          const refreshToken = user.generateRefreshToken();
-
+          
+          const accessToken = await user.generateAccessToken();
+          const refreshToken = await user.generateRefreshToken();
+          console.log('Tokens',accessToken, refreshToken);
+          
           user.refreshToken = refreshToken;
           await user.save({ validateBeforeSave: false });
+          return { refreshToken, accessToken };
      } catch (error) {
           throw new ApiError(
                500,
@@ -20,7 +23,6 @@ const generateAccessTokenAndRefershTokens = async (user) => {
           );
      }
 
-     return { refreshToken, accessToken };
 };
 
 const handleRegister = async (req, res) => {
@@ -99,6 +101,8 @@ const handleLogin = async (req, res) => {
      // Get data from the request
      const { username, email, password } = req.body;
 
+     console.log(username);
+     
      // Check if the data is ok
      if (!username || !email || !password) {
           throw new ApiError(400, "Credentails not found");
@@ -123,7 +127,7 @@ const handleLogin = async (req, res) => {
 
      // Generate refresh token and access token
      const { refreshToken, accessToken } =
-          await generateAccessTokenAndRefershTokens(user);
+          await generateAccessTokenAndRefershTokens(user._id);
      // Here the user is added a refresh token but "user" is refering to old object which does not have refresh token
      // so we will again run a DB query
 
@@ -155,11 +159,15 @@ const handleLogin = async (req, res) => {
 
 const handleLogout = async (req, res) => {
      const user = req.user;
+     console.log('Logging out', user._id);
+     
      await User.findByIdAndUpdate(user._id, {
           $set: {
-               refreshToken: undefined,
+               refreshToken: "",
           },
      });
+     console.log('Refresh token: ', user.refreshToken);
+     
 
      const options = {
           httpOnly: true,
