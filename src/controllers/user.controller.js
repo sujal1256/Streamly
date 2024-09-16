@@ -183,14 +183,12 @@ const reassignAccessTokenUsingRefreshToken = async (req, res) => {
      const incomingRefreshToken =
           req.cookies.refreshToken || req.body.refreshToken;
 
-          
      if (!incomingRefreshToken) {
           throw new ApiError(
                401,
                "Unautorized request\n Refresh token not found"
           );
      }
-
 
      const decodedToken = jwt.verify(
           incomingRefreshToken,
@@ -214,12 +212,103 @@ const reassignAccessTokenUsingRefreshToken = async (req, res) => {
      const { accessToken, refreshToken: newRefreshToken } =
           await generateAccessTokenAndRefershTokens(user._id);
 
+     return (
+          res
+               .status(200)
+               .cookie("accessToken", accessToken, options)
+               // FIXME: make a middleware for get request where it will check if the access token is there or not if not hit the end-point
+               .cookie("refreshToken", incomingRefreshToken, options)
+               .json(
+                    new ApiResponse(
+                         200,
+                         { accessToken, refreshToken: incomingRefreshToken },
+                         "Access token refreshed"
+                    )
+               )
+     );
+};
+
+const changeCurrentPassword = async (req, res) => {
+     const { oldPassword, newPassword } = req.body;
+
+     const user = await User.findById(req.user?._id);
+
+     const isPasswordCorrect = await user.isPasswordCorrect(oldPassword);
+     if (!isPasswordCorrect) {
+          throw new ApiError(401, "Incorrect Password");
+     }
+
+     user.password = newPassword;
+     await user.save({ validateBeforeSave: true });
+
+     return res
+          .send(200)
+          .json(new ApiResponse(200, {}, "Password Changed Successfully"));
+};
+
+const getCurrentUser = async (req, res) => {
+     return res.status(200, req.user, "Current user fetched successfully");
+};
+
+const updateDetails = async (req, res) => {
+     const { fullName, email } = req.body;
+
+     if (!fullName || !email) {
+          throw new ApiError(401, "All fields are required");
+     }
+
+     const user = User.findByIdAndUpdate(
+          req.user?._id,
+          {
+               $set: {
+                    fullName: fullName,
+                    email: email,
+               },
+          },
+          // using this it returns the new update contents
+          { new: true }
+     ).select("-password");
+
      return res
           .status(200)
-          .cookie("accessToken", accessToken, options)
-          // FIXME: make a middleware for get request where it will check if the access token is there or not if not hit the end-point
-          .cookie("refreshToken", incomingRefreshToken, options)
-          .json(new ApiResponse(200, {accessToken, refreshToken: incomingRefreshToken}, "Access token refreshed"))
+          .json(
+               new ApiResponse(200, user, "Account Details Update Successfully")
+          );
+};
+
+
+const updateAvatar = async (req, res) => {
+     const updatedAvatarLocalLocation = req.file?.path;
+
+     if( !updatedAvatarLocalLocation){
+          throw new ApiError(401, "Avatar file is missing");
+     }
+
+     const avatar = await uploadLocalToCloudinary(updatedAvatarLocalLocation);
+
+     if(!avatar.url){
+          throw new ApiError(401, "Error while uploading on avatar");
+     }
+
+     const user = await User.findByIdAndUpdate(req.user?._id,
+          {
+               $set:{
+                    avatar: avatar.url
+               }
+          },
+          {new: true}
+     ).select("-password");
+
+     return res.status(200).json(new ApiResponse(200, user, "Avatar updated successfully"));
 
 };
-export { handleRegister, handleLogin, handleLogout, reassignAccessTokenUsingRefreshToken};
+
+export {
+     handleRegister,
+     handleLogin,
+     handleLogout,
+     reassignAccessTokenUsingRefreshToken,
+     changeCurrentPassword,
+     getCurrentUser,
+     updateDetails,
+};
