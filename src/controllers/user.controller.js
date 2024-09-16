@@ -305,7 +305,7 @@ const updateAvatar = async (req, res) => {
           .json(new ApiResponse(200, user, "Avatar updated successfully"));
 };
 
-const getNumberOfSubsrcibers = (req, res) => {
+const getChannelDetails = (req, res) => {
      const username = req.params;
 
      if (!username) {
@@ -447,6 +447,6 @@ export {
      changeCurrentPassword,
      getCurrentUser,
      updateDetails,
-     getNumberOfSubsrcibers,
+     getChannelDetails,
      getWatchHistory
 };
