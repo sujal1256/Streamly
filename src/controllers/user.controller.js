@@ -2,17 +2,17 @@ import { ApiError } from "../utils/ApiError.util.js";
 import { ApiResponse } from "../utils/ApiResponse.util.js";
 import { User } from "../models/user.model.js";
 import { uploadLocalToCloudinary } from "../utils/cloudinary.util.js";
+import jwt from "jsonwebtoken";
 
 const generateAccessTokenAndRefershTokens = async (userId) => {
      try {
           const user = await User.findById(userId);
           console.log(userId);
 
-          
           const accessToken = await user.generateAccessToken();
           const refreshToken = await user.generateRefreshToken();
-          console.log('Tokens',accessToken, refreshToken);
-          
+          console.log("Tokens", accessToken, refreshToken);
+
           user.refreshToken = refreshToken;
           await user.save({ validateBeforeSave: false });
           return { refreshToken, accessToken };
@@ -22,7 +22,6 @@ const generateAccessTokenAndRefershTokens = async (userId) => {
                "Something went wrong while generating Access and Refresh tokens"
           );
      }
-
 };
 
 const handleRegister = async (req, res) => {
@@ -102,7 +101,7 @@ const handleLogin = async (req, res) => {
      const { username, email, password } = req.body;
 
      console.log(username);
-     
+
      // Check if the data is ok
      if (!username || !email || !password) {
           throw new ApiError(400, "Credentails not found");
@@ -159,15 +158,14 @@ const handleLogin = async (req, res) => {
 
 const handleLogout = async (req, res) => {
      const user = req.user;
-     console.log('Logging out', user._id);
-     
+     console.log("Logging out", user._id);
+
      await User.findByIdAndUpdate(user._id, {
           $set: {
                refreshToken: "",
           },
      });
-     console.log('Refresh token: ', user.refreshToken);
-     
+     console.log("Refresh token: ", user.refreshToken);
 
      const options = {
           httpOnly: true,
@@ -180,4 +178,48 @@ const handleLogout = async (req, res) => {
           .clearCookie("refreshToken", options)
           .json(new ApiResponse(200, {}, "User Loggedout successfully"));
 };
-export { handleRegister, handleLogin, handleLogout };
+
+const reassignAccessTokenUsingRefreshToken = async (req, res) => {
+     const incomingRefreshToken =
+          req.cookies.refreshToken || req.body.refreshToken;
+
+          
+     if (!incomingRefreshToken) {
+          throw new ApiError(
+               401,
+               "Unautorized request\n Refresh token not found"
+          );
+     }
+
+
+     const decodedToken = jwt.verify(
+          incomingRefreshToken,
+          process.env.REFRESH_TOKEN_SECRET
+     );
+     const user = await User.findById(decodedToken._id);
+
+     if (!user) {
+          throw new ApiError(401, "Error in Decoding the refreshToken");
+     }
+
+     if (incomingRefreshToken !== user?.refreshToken) {
+          throw new ApiError(401, "Refresh token is expired");
+     }
+
+     const options = {
+          httpOnly: true,
+          secure: true,
+     };
+
+     const { accessToken, refreshToken: newRefreshToken } =
+          await generateAccessTokenAndRefershTokens(user._id);
+
+     return res
+          .status(200)
+          .cookie("accessToken", accessToken, options)
+          // FIXME: make a middleware for get request where it will check if the access token is there or not if not hit the end-point
+          .cookie("refreshToken", incomingRefreshToken, options)
+          .json(new ApiResponse(200, {accessToken, refreshToken: incomingRefreshToken}, "Access token refreshed"))
+
+};
+export { handleRegister, handleLogin, handleLogout, reassignAccessTokenUsingRefreshToken};
