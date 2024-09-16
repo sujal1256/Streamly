@@ -3,6 +3,7 @@ import { ApiResponse } from "../utils/ApiResponse.util.js";
 import { User } from "../models/user.model.js";
 import { uploadLocalToCloudinary } from "../utils/cloudinary.util.js";
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 
 const generateAccessTokenAndRefershTokens = async (userId) => {
      try {
@@ -276,31 +277,166 @@ const updateDetails = async (req, res) => {
           );
 };
 
-
 const updateAvatar = async (req, res) => {
      const updatedAvatarLocalLocation = req.file?.path;
 
-     if( !updatedAvatarLocalLocation){
+     if (!updatedAvatarLocalLocation) {
           throw new ApiError(401, "Avatar file is missing");
      }
 
      const avatar = await uploadLocalToCloudinary(updatedAvatarLocalLocation);
 
-     if(!avatar.url){
+     if (!avatar.url) {
           throw new ApiError(401, "Error while uploading on avatar");
      }
 
-     const user = await User.findByIdAndUpdate(req.user?._id,
+     const user = await User.findByIdAndUpdate(
+          req.user?._id,
           {
-               $set:{
-                    avatar: avatar.url
-               }
+               $set: {
+                    avatar: avatar.url,
+               },
           },
-          {new: true}
+          { new: true }
      ).select("-password");
 
-     return res.status(200).json(new ApiResponse(200, user, "Avatar updated successfully"));
+     return res
+          .status(200)
+          .json(new ApiResponse(200, user, "Avatar updated successfully"));
+};
 
+const getNumberOfSubsrcibers = (req, res) => {
+     const username = req.params;
+
+     if (!username) {
+          throw new ApiError(400, "username not found");
+     }
+
+     // Aggregation Pipeline
+     const channel = User.aggregate([
+          // 1st stage
+          {
+               $match: {
+                    username: username?.toLowerCase(),
+               },
+          },
+          {
+               // Number of subscribers
+               $lookup: {
+                    from: "subscriptions",
+                    localField: "_id",
+                    foreignField: "channel",
+                    as: "subscribers",
+               },
+          },
+          {
+               // Number of channel subscribed
+               $lookup: {
+                    from: "subscriptions",
+                    localField: "_id",
+                    foreignField: "subscriber",
+                    as: "subscribedTo",
+               },
+          },
+          {
+               // To add more fields
+               $addFields: {
+                    subscriberCount: {
+                         $size: "$subscribers",
+                    },
+                    channelsSubscribedToCount: {
+                         $size: "$subscribedTo",
+                    },
+                    isSubscribed: {
+                         $cond: {
+                              if: {
+                                   $in: [
+                                        req.user?._id,
+                                        "$subscribers.subscriber",
+                                   ],
+                              },
+                              then: true,
+                              else: false,
+                         },
+                    },
+               },
+          },
+          {
+               $project: {
+                    fullName: 1,
+                    username: 1,
+                    subscriberCount: 1,
+                    channelsSubscribedToCount: 1,
+                    isSubscribed: 1,
+                    avatar: 1,
+                    coverImage: 1,
+                    email: 1,
+               },
+          },
+     ]);
+
+     if (!channel?.length) {
+          throw new ApiError("Channel does not exist");
+     }
+
+     return res
+          .status(200)
+          .json(
+               new ApiResponse(
+                    200,
+                    channel[0],
+                    "Number of subscribers and channels subscribed to"
+               )
+          );
+};
+
+const getWatchHistory = async (req, res) => {
+     const user = User.aggregate([
+          {
+               $match: {
+                    // we didn't use req.user._id because it is actually a string not an id so we need to convert it into an id it happens automatically when we work outside of the aggregation pipelines
+                    _id: new mongoose.Schema.Types.ObjectId(req.user._id),
+               },
+          },
+          {
+               $lookup: {
+                    from: "videos",
+                    localField: "watchHistory",
+                    foreignField: "_id",
+                    as: "watchHistory",
+                    pipeline: [
+                         {
+                              $lookup: {
+                                   from: "users",
+                                   localField: "owner",
+                                   foreignField: "_id",
+                                   as: "owner",
+                                   // Now we want to reduce the number of fields user is sending
+                                   pipeline: [
+                                        {
+                                             $project: {
+                                                  fullName: 1,
+                                                  username: 1,
+                                                  avatar: 1,
+                                             },
+                                        },
+                                        {},
+                                   ],
+                              },
+                         },
+                         {
+                              $addFields: {
+                                   owner: {
+                                        $first: "$owner",
+                                   },
+                              },
+                         },
+                    ],
+               },
+          },
+     ]);
+
+     return res.status(200).json(new ApiResponse(200, user[0].watchHistory, "Watch History fetched successfully"))
 };
 
 export {
@@ -311,4 +447,6 @@ export {
      changeCurrentPassword,
      getCurrentUser,
      updateDetails,
+     getNumberOfSubsrcibers,
+     getWatchHistory
 };
